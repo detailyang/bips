@@ -4,10 +4,9 @@
 # be used in production environments. The code is vulnerable to timing attacks,
 # for example.
 
-from typing import Any, List, Optional, Tuple, NewType, NamedTuple
+from typing import List, Optional, Tuple, NewType, NamedTuple
 import hashlib
 import secrets
-import time
 
 #
 # The following helper functions were copied from the BIP-340 reference implementation:
@@ -317,7 +316,7 @@ SessionContext = NamedTuple('SessionContext', [('aggnonce', bytes),
                                                ('is_xonly', List[bool]),
                                                ('msg', bytes)])
 
-def key_agg_and_tweak(pubkeys: List[PlainPk], tweaks: List[bytes], is_xonly: List[bool]):
+def key_agg_and_tweak(pubkeys: List[PlainPk], tweaks: List[bytes], is_xonly: List[bool]) -> KeyAggContext:
     if len(tweaks) != len(is_xonly):
         raise ValueError('The `tweaks` and `is_xonly` arrays must have the same length.')
     keyagg_ctx = key_agg(pubkeys)
@@ -351,8 +350,8 @@ def get_session_key_agg_coeff(session_ctx: SessionContext, P: Point) -> int:
 
 def sign(secnonce: bytearray, sk: bytes, session_ctx: SessionContext) -> bytes:
     (Q, gacc, _, b, R, e) = get_session_values(session_ctx)
-    k_1_ = int_from_bytes(secnonce[0:32])
-    k_2_ = int_from_bytes(secnonce[32:64])
+    k_1_ = int_from_bytes(bytes(secnonce[0:32]))
+    k_2_ = int_from_bytes(bytes(secnonce[32:64]))
     # Overwrite the secnonce argument with zeros such that subsequent calls of
     # sign with the same secnonce raise a ValueError.
     secnonce[:64] = bytearray(b'\x00'*64)
@@ -440,8 +439,6 @@ def partial_sig_verify_internal(psig: bytes, pubnonce: bytes, pk: bytes, session
     Re_s_ = point_add(R_s1, point_mul(R_s2, b))
     Re_s = Re_s_ if has_even_y(R) else point_negate(Re_s_)
     P = cpoint(pk)
-    if P is None:
-        return False
     a = get_session_key_agg_coeff(session_ctx, P)
     g = 1 if has_even_y(Q) else n - 1
     g_ = g * gacc % n
@@ -470,8 +467,7 @@ import sys
 def fromhex_all(l):
     return [bytes.fromhex(l_i) for l_i in l]
 
-# Check that calling `try_fn` raises a `exception`. If `exception` is raised,
-# examine it with `except_fn`.
+# Check if calling `try_fn` raises an exception. If yes, examine it with `except_fn`.
 def assert_raises(exception, try_fn, except_fn):
     raised = False
     try:
@@ -523,7 +519,7 @@ def test_key_agg_vectors() -> None:
 
         assert get_xonly_pk(key_agg(pubkeys)) == expected
 
-    for i, test_case in enumerate(error_test_cases):
+    for test_case in error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         pubkeys = [X[i] for i in test_case["key_indices"]]
@@ -572,7 +568,7 @@ def test_nonce_agg_vectors() -> None:
         expected = bytes.fromhex(test_case["expected"])
         assert nonce_agg(pubnonces) == expected
 
-    for i, test_case in enumerate(error_test_cases):
+    for test_case in error_test_cases:
         exception, except_fn = get_error_details(test_case)
         pubnonces = [pnonce[i] for i in test_case["pnonce_indices"]]
         assert_raises(exception, lambda: nonce_agg(pubnonces), except_fn)
@@ -598,7 +594,10 @@ def test_sign_verify_vectors() -> None:
 
     aggnonces = fromhex_all(test_data["aggnonces"])
     # The aggregate of the first three elements of pnonce is at index 0
-    assert(aggnonces[0] == nonce_agg([pnonce[0], pnonce[1], pnonce[2]]))
+    assert (aggnonces[0] == nonce_agg([pnonce[0], pnonce[1], pnonce[2]]))
+    # The aggregate of the first and fourth elements of pnonce is at index 1,
+    # which is the infinity point encoded as a zeroed 33-byte array
+    assert (aggnonces[1] == nonce_agg([pnonce[0], pnonce[3]]))
 
     msgs = fromhex_all(test_data["msgs"])
 
@@ -626,7 +625,7 @@ def test_sign_verify_vectors() -> None:
         assert sign(secnonce_tmp, sk, session_ctx) == expected
         assert partial_sig_verify(expected, pubnonces, pubkeys, [], [], msg, signer_index)
 
-    for i, test_case in enumerate(sign_error_test_cases):
+    for test_case in sign_error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         pubkeys = [X[i] for i in test_case["key_indices"]]
@@ -646,7 +645,7 @@ def test_sign_verify_vectors() -> None:
 
         assert not partial_sig_verify(sig, pubnonces, pubkeys, [], [], msg, signer_index)
 
-    for i, test_case in enumerate(verify_error_test_cases):
+    for test_case in verify_error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         sig = bytes.fromhex(test_case["sig"])
@@ -669,8 +668,8 @@ def test_tweak_vectors() -> None:
     secnonce = bytearray(bytes.fromhex(test_data["secnonce"]))
     pnonce = fromhex_all(test_data["pnonces"])
     # The public nonce corresponding to secnonce is at index 0
-    k_1 = int_from_bytes(secnonce[0:32])
-    k_2 = int_from_bytes(secnonce[32:64])
+    k_1 = int_from_bytes(bytes(secnonce[0:32]))
+    k_2 = int_from_bytes(bytes(secnonce[32:64]))
     R_s1 = point_mul(G, k_1)
     R_s2 = point_mul(G, k_2)
     assert R_s1 is not None and R_s2 is not None
@@ -702,7 +701,7 @@ def test_tweak_vectors() -> None:
         assert sign(secnonce_tmp, sk, session_ctx) == expected
         assert partial_sig_verify(expected, pubnonces, pubkeys, tweaks, is_xonly, msg, signer_index)
 
-    for i, test_case in enumerate(error_test_cases):
+    for test_case in error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         pubkeys = [X[i] for i in test_case["key_indices"]]
@@ -747,7 +746,7 @@ def test_det_sign_vectors() -> None:
         session_ctx = SessionContext(aggnonce, pubkeys, tweaks, is_xonly, msg)
         assert partial_sig_verify_internal(psig, pubnonce, pubkeys[signer_index], session_ctx)
 
-    for i, test_case in enumerate(error_test_cases):
+    for test_case in error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         pubkeys = [X[i] for i in test_case["key_indices"]]
@@ -796,7 +795,7 @@ def test_sig_agg_vectors() -> None:
         aggpk = get_xonly_pk(key_agg_and_tweak(pubkeys, tweaks, is_xonly))
         assert schnorr_verify(msg, aggpk, sig)
 
-    for i, test_case in enumerate(error_test_cases):
+    for test_case in error_test_cases:
         exception, except_fn = get_error_details(test_case)
 
         pubnonces = [pnonce[i] for i in test_case["nonce_indices"]]
@@ -838,9 +837,9 @@ def test_sign_and_verify_random(iters: int) -> None:
         # On even iterations use regular signing algorithm for signer 2,
         # otherwise use deterministic signing algorithm
         if i % 2 == 0:
-            # Use a clock for extra_in
-            t = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-            secnonce_2, pubnonce_2 = nonce_gen(sk_2, pk_2, aggpk, msg, t.to_bytes(8, 'big'))
+            # Use random extra_in of random length
+            extra_in = secrets.token_bytes(secrets.randbelow(42))
+            secnonce_2, pubnonce_2 = nonce_gen(sk_2, pk_2, aggpk, msg, extra_in)
         else:
             aggothernonce = nonce_agg([pubnonce_1])
             rand = secrets.token_bytes(32)
